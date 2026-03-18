@@ -6,9 +6,9 @@ This script assumes you have run the [discord-export](../discord-export/README.m
 
 # How to run
 
-- Copy the `discord.rb` script into your Discord installations `script/import_scripts` folder. 
+- Copy the `discord.rb` script into your Discourse installations `script/import_scripts` folder. 
 - Edit the database settings in `discord.rb` to match your settings. 
-- In the Discord root directory, 
+- In the Discourse root directory, 
   - Run `IMPORT=1 bundle install` to install all bundles needed by the import
   - Run `IMPORT=1 bundle exec ruby script/import_scripts/discord.rb` to perform the import
 - 
