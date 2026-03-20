@@ -33,3 +33,21 @@ flowchart LR
   - Using [Discourse Docker]()
   - On a [virtual machine](https://gist.github.com/samie/3d9e1d6274be5cbda7e25356a1efcad3) (needed for Arm-based Mac).
 - A MySQL or MariaDB database with a user that has access to a database.
+
+## Discord -> Discourse migration process overview
+
+* Announce maintenance window
+* Make Discourse Read-Only (Backups > Read-Only)
+* Backup Discourse
+* Push backup to the Dev server
+* Export Discord to Conversion DB
+* On the Dev server, delete any channels not wanted on the prod server
+* Make a backup on the dev server
+* Export the backup to production
+* Restore the new backup
+* Make Discourse read/write again
+* Announce the end of the maintenance window
+
+
+
+

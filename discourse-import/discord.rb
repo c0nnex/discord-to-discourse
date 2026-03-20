@@ -12,8 +12,8 @@ class ImportScripts::Discord < ImportScripts::Base
     super
 
     # Allow larger downloads during import
-    SiteSetting.max_image_size_kb = 10_240
-    SiteSetting.max_attachment_size_kb = 10_240
+    SiteSetting.max_image_size_kb = 20_240
+    SiteSetting.max_attachment_size_kb = 20_240
 
     @client = Mysql2::Client.new(
       host: "localhost",
