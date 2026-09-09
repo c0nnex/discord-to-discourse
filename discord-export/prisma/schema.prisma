@@ -33,6 +33,8 @@ model Post {
   author        User         @relation(fields: [authorId], references: [id])
   created       DateTime     @default(now())
   body          String       @db.Text
+  embeds        Json?
+  embedsCheckedAt DateTime?
   messageType Int?
   referenceType Int?
   referenceMessageId String?
@@ -45,6 +47,7 @@ model Post {
   topic         Topic        @relation(fields: [topicId], references: [id])
 
   @@index([referenceCheckedAt, id])
+  @@index([embedsCheckedAt, id])
 }
 
 model Topic {
@@ -61,6 +64,9 @@ model Category {
   id      String  @id @default(uuid())
   name    String
   topics  Topic[]
+  exportEnabled Boolean @default(false)
+  exportSince DateTime?
+  exportCheckedAt DateTime?
 }
 
 
@@ -76,6 +82,12 @@ model TopicExportState {
   topicId String @id
   topic Topic @relation(fields: [topicId], references: [id])
   lastMessageId String @default("0")
+  exportFromId String @default("0")
   scanBeforeId String?
   scanHighId String?
+}
+
+model ExportControl {
+  key String @id
+  value String @db.Text
 }

@@ -260,3 +260,68 @@ These commands do not load local `.env` files. Unit tests use synthetic fixtures
 and mocked requests. The two database tests
 are skipped unless `ATTACHMENT_TEST_DATABASE_URL` points to an explicitly
 prepared, disposable test database. Never use a live export database for tests.
+
+## Embeds, exclusion role and UTC start date
+
+Apply additive migrations and regenerate the Prisma client before using this
+version. Stop processes using the same database during the schema upgrade:
+
+```sh
+bun run node_modules/prisma/build/index.js migrate deploy
+bun run node_modules/prisma/build/index.js generate
+bun run index.ts export --since 2024-01-01
+```
+
+`--since yyyy-mm-dd` includes messages from 00:00:00 UTC on that date. Omit it
+for all history. Invalid dates and unsupported options fail before export.
+The cutoff applies to message timestamps in all selected channel types and their
+threads; old threads are still discovered because they may contain recent posts.
+Changing or removing the cutoff starts a new resumable scan without deleting
+previous posts or attachments. Replaying known IDs remains idempotent.
+
+`ExportControl` stores key/value settings. Set `NoExportRoleId` to the decimal
+ID of your exclusion role using your database client; the migration creates an
+empty value, which disables filtering. Role names are irrelevant. A configured
+invalid or missing guild role stops the export. No environment edit is required.
+
+Presence of that role in a channel's permission overwrites excludes the channel,
+even with both allow and deny equal to zero. Member-specific overwrites do not
+count. A marker on a category also excludes its child channels. Excluded forum
+channels include their threads. No Discord permissions are changed by the script.
+Role/channel settings are fetched once at the beginning of each run; edits during
+a run take effect on the next run.
+
+`Category.exportEnabled`, `exportSince` and `exportCheckedAt` record the latest
+selection. Existing content in excluded channels or before the cutoff is retained.
+Selection is not proof of a completed export. Importers must explicitly honor this
+metadata and the message cutoff; the existing Discourse importer is not adapted
+by this change. Download/size/reference repair commands keep their existing scope.
+
+`Post.embeds` preserves the full API embed array as JSON, including ordered fields,
+inline flags, links and unknown nested properties. This applies to all authors and
+to both mixed-text and embed-only messages. SQL NULL with a null
+`embedsCheckedAt` means not captured; a captured empty array means the API returned
+no embeds. Existing message bodies, authors and attachments remain unchanged.
+Embed media URLs are stored as received, not downloaded into AttachmentBlob.
+Rendering these embeds is a separate importer task.
+
+Completed incremental cursors do not revisit historical messages. To capture
+embeds for previously stored posts, run separately:
+
+```sh
+bun run index.ts backfillEmbeds --since 2024-01-01
+```
+
+The optional date has the same UTC meaning; omit it for all stored history in
+currently selected channels. The command checks the exclusion role again, fetches
+only posts without captured embeds, and leaves the export selection snapshot
+unchanged. Source failures remain pending and yield exit code 2; database failures
+abort. A rerun skips captured posts. Normal export also fills missing embeds if a
+legacy post is encountered during a replay. Neither path refreshes already
+captured embeds after subsequent Discord edits.
+
+Discord Message Content access is required. The API can return empty content,
+embeds and attachments without it; an empty array alone cannot establish that the
+original visible message had no embeds. This stores the API embed representation,
+not every possible Discord message property or a complete current-state mirror.
+See [Discord Message Object](https://docs.discord.com/developers/resources/message#message-object).

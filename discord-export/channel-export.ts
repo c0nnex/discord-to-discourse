@@ -1,7 +1,10 @@
 import type {PrismaClient} from "@prisma/client";
 
 export interface ExportChannel { id: string; name: string; type: number; }
-interface SourceChannel { id: string; name?: string | null; type: number; }
+export interface SourceChannel {
+    id: string; name?: string | null; type: number; parent_id?: string | null;
+    permission_overwrites?: readonly {id: string; type: number; allow?: string; deny?: string}[];
+}
 
 export function selectExportChannels(channels: readonly SourceChannel[]): ExportChannel[] {
     return channels.filter(channel => [0, 5, 15].includes(channel.type)).map(channel => {

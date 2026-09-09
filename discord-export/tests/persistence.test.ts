@@ -17,9 +17,9 @@ test.skipIf(!databaseUrl)("real database: additive export, atomic blobs and down
         id: prefix + "-message", channel_id: topicId, type: 19,
         message_reference: {message_id: "90071992547409999", channel_id: "external-thread", guild_id: "external-guild"},
         author: {id: authorId, username: "original"},
-        timestamp: "2020-01-01T00:00:00Z", content: "original",
+        timestamp: "2020-01-01T00:00:00Z", content: "original", embeds: [],
         attachments: [{id: prefix + "-file", filename: "example.txt", url: "https://cdn.discordapp.com/attachments/synthetic/file", size: 3}],
-    } as APIMessage;
+    } as unknown as APIMessage;
     try {
         await prisma.category.create({data: {id: prefix, name: "synthetic"}});
         await prisma.topic.create({data: {id: topicId, title: "original", categoryId: prefix}});
@@ -31,6 +31,8 @@ test.skipIf(!databaseUrl)("real database: additive export, atomic blobs and down
         expect(names).toBe(1);
         expect((await prisma.post.findUniqueOrThrow({where: {id: message.id}})).body).toBe("original");
         const exported = await prisma.post.findUniqueOrThrow({where: {id: message.id}});
+        expect(exported.embeds).toEqual([]);
+        expect(exported.embedsCheckedAt).toBeInstanceOf(Date);
         expect(exported.referenceMessageId).toBe("90071992547409999");
         expect(exported.referenceType).toBe(0);
         expect(exported.messageType).toBe(19);
@@ -101,7 +103,7 @@ test.skipIf(!databaseUrl)("incremental cursor persists across invocations in Mar
         await prisma.category.create({data:{id,name:"synthetic"}});
         await prisma.topic.create({data:{id,title:"synthetic",categoryId:id}});
         const {exportTopic}=await import("../incremental-export");
-        const msg={id:"90071992547409999",author:{id,username:"fixture"},timestamp:"2020-01-01T00:00:00Z",content:"fixture",attachments:[]} as unknown as APIMessage;
+        const msg={id:"90071992547409999",author:{id,username:"fixture"},timestamp:"2020-01-01T00:00:00Z",content:"fixture",attachments:[],embeds:[]} as unknown as APIMessage;
         const get=async(_:string,q:any)=>q.after==="0"?[msg]:[];
         expect((await exportTopic(prisma,id,get,()=>"fixture")).added).toBe(1);
         expect((await prisma.topicExportState.findUniqueOrThrow({where:{topicId:id}})).lastMessageId).toBe(msg.id);
