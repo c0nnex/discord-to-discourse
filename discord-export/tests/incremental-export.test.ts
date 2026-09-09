@@ -1,6 +1,6 @@
 import {expect,test} from "bun:test";
 import type {APIMessage, RESTGetAPIChannelMessagesQuery} from "@discordjs/core";
-import {exportTopic} from "./incremental-export";
+import {exportTopic} from "../incremental-export";
 
 function fixture(count: number, nearestAfter = false) {
     const base = 90071992547409930n;

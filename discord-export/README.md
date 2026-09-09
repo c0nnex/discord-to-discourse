@@ -246,3 +246,17 @@ References: [Discord channel types](https://docs.discord.com/developers/resource
 [Get Channel Messages](https://docs.discord.com/developers/resources/message#get-channel-messages).
 
 Older threads can omit `create_timestamp` (Discord only populates it for threads created after 2022-01-09). Active and archived thread export falls back to the Snowflake date when the creation timestamp is missing or invalid; archive time is not used as creation time.
+
+## Tests
+
+Exporter tests live in `tests/`. From `discord-export/`, run:
+
+```bash
+bun --no-env-file run test
+bun --no-env-file run typecheck
+```
+
+These commands do not load local `.env` files. Unit tests use synthetic fixtures
+and mocked requests. The two database tests
+are skipped unless `ATTACHMENT_TEST_DATABASE_URL` points to an explicitly
+prepared, disposable test database. Never use a live export database for tests.

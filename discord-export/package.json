@@ -13,5 +13,9 @@
     "@prisma/client": "5.5.2",
     "marked": "^9.1.4",
     "prisma": "^5.5.2"
+  },
+  "scripts": {
+    "test": "bun --no-env-file test ./tests",
+    "typecheck": "tsc --noEmit"
   }
 }

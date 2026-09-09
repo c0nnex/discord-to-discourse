@@ -1,6 +1,6 @@
 import {expect, test} from "bun:test";
 import type {PrismaClient} from "@prisma/client";
-import {refreshAttachments} from "./refresh-attachments";
+import {refreshAttachments} from "../refresh-attachments";
 
 test("repairs unknown attachments only and makes no requests on a completed rerun", async () => {
     const rows = [{id:"a",url:"truncated",size:null as bigint|null},{id:"b",url:"old",size:5n}];

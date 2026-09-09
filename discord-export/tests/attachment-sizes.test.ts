@@ -1,5 +1,5 @@
 import {afterEach, expect, test} from "bun:test";
-import {getAttachmentSize, getattachmentSizes, formatAttachmentError} from "./attachment-sizes";
+import {getAttachmentSize, getattachmentSizes, formatAttachmentError} from "../attachment-sizes";
 import type {PrismaClient} from "@prisma/client";
 
 const originalFetch = globalThis.fetch;

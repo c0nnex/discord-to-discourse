@@ -2,9 +2,9 @@ import {expect, test} from "bun:test";
 import {PrismaClient} from "@prisma/client";
 import type {APIMessage} from "@discordjs/core";
 import {createHash, randomUUID} from "node:crypto";
-import {backfillMessageReferences} from "./message-references";
-import {storeMessage} from "./store-message";
-import {downloadAttachments} from "./download-attachments";
+import {backfillMessageReferences} from "../message-references";
+import {storeMessage} from "../store-message";
+import {downloadAttachments} from "../download-attachments";
 
 // Explicit opt-in; only point this at a disposable, migrated test database.
 const databaseUrl = process.env.ATTACHMENT_TEST_DATABASE_URL;
@@ -100,7 +100,7 @@ test.skipIf(!databaseUrl)("incremental cursor persists across invocations in Mar
     try {
         await prisma.category.create({data:{id,name:"synthetic"}});
         await prisma.topic.create({data:{id,title:"synthetic",categoryId:id}});
-        const {exportTopic}=await import("./incremental-export");
+        const {exportTopic}=await import("../incremental-export");
         const msg={id:"90071992547409999",author:{id,username:"fixture"},timestamp:"2020-01-01T00:00:00Z",content:"fixture",attachments:[]} as unknown as APIMessage;
         const get=async(_:string,q:any)=>q.after==="0"?[msg]:[];
         expect((await exportTopic(prisma,id,get,()=>"fixture")).added).toBe(1);

@@ -1,6 +1,6 @@
 import {expect, test} from "bun:test";
 import type {PrismaClient} from "@prisma/client";
-import {backfillMessageReferences, referenceData, type ReferenceSource} from "./message-references";
+import {backfillMessageReferences, referenceData, type ReferenceSource} from "../message-references";
 
 function source(id = "1"): ReferenceSource {
     return {id, channel_id: "thread", type: 19};

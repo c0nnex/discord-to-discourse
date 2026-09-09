@@ -1,7 +1,7 @@
 import {expect, test} from "bun:test";
 import type {APIMessage} from "@discordjs/core";
-import {channelCreatedAt, persistChannels, selectExportChannels} from "./channel-export";
-import {exportTopic} from "./incremental-export";
+import {channelCreatedAt, persistChannels, selectExportChannels} from "../channel-export";
+import {exportTopic} from "../incremental-export";
 
 const general = {id: "90071992547409920", name: "general", type: 0};
 const help = {id: "90071992547409921", name: "technical-help", type: 0};

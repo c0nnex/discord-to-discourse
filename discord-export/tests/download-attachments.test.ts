@@ -1,6 +1,6 @@
 import {afterEach, expect, test} from "bun:test";
 import {createHash} from "node:crypto";
-import {downloadFile, downloadLimit, downloadAttachments, MAX_DOWNLOAD_SIZE} from "./download-attachments";
+import {downloadFile, downloadLimit, downloadAttachments, MAX_DOWNLOAD_SIZE} from "../download-attachments";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
