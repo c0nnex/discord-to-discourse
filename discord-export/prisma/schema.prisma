@@ -1,0 +1,81 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String  @id @default(uuid())
+  username          String
+  displayName       String
+  posts             Post[]
+}
+
+model Attachment {
+  id        String  @id @default(uuid())
+  name      String  @db.VarChar(500)
+  url       String  @db.Text
+  size      BigInt?
+  blob      AttachmentBlob?
+  postId    String
+  post      Post    @relation(fields: [postId], references: [id])
+}
+
+model Post {
+  id            String       @id @default(uuid())
+  authorId      String
+  author        User         @relation(fields: [authorId], references: [id])
+  created       DateTime     @default(now())
+  body          String       @db.Text
+  messageType Int?
+  referenceType Int?
+  referenceMessageId String?
+  referenceChannelId String?
+  referenceGuildId String?
+  referencedMessageDeleted Boolean?
+  referenceCheckedAt DateTime?
+  attachments   Attachment[]
+  topicId       String
+  topic         Topic        @relation(fields: [topicId], references: [id])
+
+  @@index([referenceCheckedAt, id])
+}
+
+model Topic {
+  id         String     @id @default(uuid())
+  title      String     @db.VarChar(1000)
+  posts      Post[]
+  created    DateTime   @default(now())
+  categoryId String
+  exportState TopicExportState?
+  category   Category   @relation(fields: [categoryId], references: [id])
+}
+
+model Category {
+  id      String  @id @default(uuid())
+  name    String
+  topics  Topic[]
+}
+
+
+model AttachmentBlob {
+  attachmentId String @id
+  attachment   Attachment @relation(fields: [attachmentId], references: [id])
+  content      Bytes @db.LongBlob
+  sha256       String @db.Char(64)
+  downloadedAt DateTime @default(now())
+}
+
+model TopicExportState {
+  topicId String @id
+  topic Topic @relation(fields: [topicId], references: [id])
+  lastMessageId String @default("0")
+  scanBeforeId String?
+  scanHighId String?
+}
