@@ -325,3 +325,29 @@ embeds and attachments without it; an empty array alone cannot establish that th
 original visible message had no embeds. This stores the API embed representation,
 not every possible Discord message property or a complete current-state mirror.
 See [Discord Message Object](https://docs.discord.com/developers/resources/message#message-object).
+
+## Single-channel export and persistent channel start dates
+
+```sh
+bun run index.ts export --channel-id CHANNEL_ID --since 2024-06-01
+bun run index.ts backfillEmbeds --channel-id CHANNEL_ID
+bun run index.ts export
+```
+
+Replace CHANNEL_ID with the decimal ID of an exportable text, announcement or
+forum channel, not a thread. NoExport role exclusions still apply; an excluded,
+inaccessible or unsupported requested channel fails before data changes.
+
+A single-channel **export** with --since saves `ChannelStartDate:<channel ID>` in
+ExportControl. Normal exports and embed backfills keep this UTC lower boundary,
+including when --since is omitted. A global --since can narrow the run further
+but does not replace a pinned channel date. To change a pinned date, explicitly
+export that channel with its new --since; removing/emptying the database setting
+restores unrestricted history on a subsequent export without --since.
+
+Backfill options never modify the pinned setting. Single-channel exports update
+only that channel's selection snapshot; other channel flags/dates remain intact.
+No additional schema migration is needed. This supersedes the earlier statement
+that omitting --since always selects all history: that remains true only for
+channels without a pinned date. Four weeks means a concrete calendar date chosen
+by the operator, not a sliding window that changes on every run.

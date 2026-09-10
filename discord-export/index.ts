@@ -1,5 +1,5 @@
 import {parseExportOptions} from "./export-options";
-import {readNoExportRoleId, selectControlledChannels, saveChannelSelection} from "./export-control";
+import {readNoExportRoleId, selectControlledChannels, saveChannelSelection, selectRequestedChannel, channelStartDates} from "./export-control";
 import {backfillEmbeds} from "./embed-export";
 import {backfillMessageReferences} from "./message-references";
 import {REST} from "@discordjs/rest";
@@ -41,33 +41,37 @@ function initializeDiscordApi(requireGuild = false) {
  *
  * Users are saved in a separate table and their display names are anonymized.
  */
-async function exportDiscordData(since?: Date) {
+async function exportDiscordData(since?: Date, channelId?: string) {
     initializeDiscordApi(true);
     const startTime = Date.now();
     console.log("Exporting Discord data...");
-    const channels = await exportChannels(since);
+    const channels = await exportChannels(since, channelId);
     await exportThreads(channels);
     await exportMessages(channels, since);
     console.log(`Finished exporting Discord data in ${(Date.now() - startTime) / 1000}s.`);
 }
 
-async function selectChannels(since?: Date, persistSelection = true) {
+async function selectChannels(since?: Date, persistSelection = true, channelId?: string) {
     const roleId = await readNoExportRoleId(prisma);
     if (roleId) {
         const roles = await api.guilds.getRoles(guildId!);
         if (!roles.some(role => role.id === roleId)) throw new Error("Configured NoExportRoleId is not present in this guild");
     }
     const source = await api.guilds.getChannels(guildId!);
-    const {selected, excluded} = selectControlledChannels(source, roleId);
+    const {selected: allowed, excluded} = selectControlledChannels(source, roleId);
+    const selected = selectRequestedChannel(allowed, channelId);
     for (const channel of excluded) console.log(`Excluded channel ${channel.id}: NoExport role marker on channel or parent.`);
     console.log(`Channel selection: selected=${selected.length}; excluded=${excluded.length}; roleFilter=${roleId ? "enabled" : "disabled"}; since=${since?.toISOString() ?? "all"}.`);
-    if (persistSelection) await saveChannelSelection(prisma, source, selected.map(channel => channel.id), since);
+    if (persistSelection) {
+        const dates = await channelStartDates(prisma, selected.map(c => c.id), since, channelId, true);
+        await saveChannelSelection(prisma, source, selected.map(channel => channel.id), since, channelId, dates);
+    }
     return selected;
 }
 
-async function exportChannels(since?: Date) {
+async function exportChannels(since?: Date, channelId?: string) {
     console.log("Exporting forum, text and announcement channels...");
-    const channels = await persistChannels(prisma, await selectChannels(since));
+    const channels = await persistChannels(prisma, await selectChannels(since, true, channelId));
     console.log(`Exported ${channels.length} channels; ${channels.filter(channel => channel.type !== 15).length} pseudo-topics for direct channel messages.`);
     return channels;
 }
@@ -158,6 +162,7 @@ async function exportMessages(selected: readonly ExportChannel[], since?: Date) 
         },
     });
 
+    const dates = await channelStartDates(prisma, selected.map(c => c.id), since);
     for (const category of channels) {
         console.log(`Exporting messages for ${category.name}`);
 
@@ -165,7 +170,7 @@ async function exportMessages(selected: readonly ExportChannel[], since?: Date) 
             console.log(`- Exporting ${topic.id === category.id ? "channel messages" : "thread messages"} for ${topic.title}`);
 
             const result = await exportTopic(prisma, topic.id,
-                (id, query) => api.channels.getMessages(id, query), allocateName, undefined, since);
+                (id, query) => api.channels.getMessages(id, query), allocateName, undefined, dates.get(category.id));
             totalMessages += result.added;
             skippedMessages += result.skipped;
         }
@@ -176,13 +181,16 @@ async function exportMessages(selected: readonly ExportChannel[], since?: Date) 
 
 
 try {
-    const {command, since} = parseExportOptions(process.argv.slice(2));
+    const {command, since, channelId} = parseExportOptions(process.argv.slice(2));
     if (command === "backfillEmbeds") {
         initializeDiscordApi(true);
-        const channels = await selectChannels(since, false);
-        const result = await backfillEmbeds(prisma, channels.map(channel => channel.id),
-            (channelId, messageId) => api.channels.getMessage(channelId, messageId), since);
-        if (result.failed > 0 || result.remaining > 0) process.exitCode = 2;
+        const channels = await selectChannels(since, false, channelId);
+        const dates = await channelStartDates(prisma, channels.map(c => c.id), since);
+        for (const channel of channels) {
+            const result = await backfillEmbeds(prisma, [channel.id],
+                (sourceId, messageId) => api.channels.getMessage(sourceId, messageId), dates.get(channel.id));
+            if (result.failed > 0 || result.remaining > 0) process.exitCode = 2;
+        }
     } else if (command === "backfillMessageReferences") {
         initializeDiscordApi();
         const result = await backfillMessageReferences(prisma, (channelId, messageId) => api.channels.getMessage(channelId, messageId));
@@ -203,7 +211,7 @@ try {
         const result = await downloadAttachments(prisma, (channelId, messageId) => api.channels.getMessage(channelId, messageId));
         if (result.failed > 0 || result.remaining > 0) { process.exitCode = 2; }
     } else {
-        await exportDiscordData(since);
+        await exportDiscordData(since, channelId);
     }
     await prisma.$disconnect();
 } catch (e) {

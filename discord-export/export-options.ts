@@ -21,13 +21,19 @@ export function parseExportOptions(args: readonly string[]) {
         offset = 1;
     }
     let since: Date | undefined;
-    if (args.length > offset) {
-        if (args.length !== offset + 2 || args[offset] !== "--since" || !["export", "backfillEmbeds"].includes(command)) {
-            throw new Error("Only export and backfillEmbeds accept --since yyyy-mm-dd");
+    let channelId: string | undefined;
+    const seen = new Set<string>();
+    for (let i = offset; i < args.length; i += 2) {
+        const option = args[i], value = args[i + 1];
+        if (!["export", "backfillEmbeds"].includes(command) || !value || seen.has(option)) {
+            throw new Error("Invalid or duplicate export option");
         }
-        since = parseStartDate(args[offset + 1]);
+        seen.add(option);
+        if (option === "--since") since = parseStartDate(value);
+        else if (option === "--channel-id" && /^[1-9][0-9]*$/.test(value) && BigInt(value) <= 18446744073709551615n) channelId = value;
+        else throw new Error("Expected --since yyyy-mm-dd or --channel-id Snowflake");
     }
-    return {command, since};
+    return {command, since, ...(channelId ? {channelId} : {})};
 }
 
 // Discord's after boundary is exclusive; include every Snowflake at midnight.
