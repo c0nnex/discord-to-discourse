@@ -115,8 +115,12 @@ bun run index.ts downloadAttachments
 ```
 
 Export stores attachment metadata with size NULL, never downloads bodies and never
-copies the Discord API size. downloadAttachments obtains fresh URLs via the Discord
-API, uses CDN HEAD only where size is NULL, and persists URL/size before GET.
+copies the Discord API size. downloadAttachments tries each stored URL first,
+using CDN HEAD only where size is NULL. HTTP 404 from HEAD or GET triggers at most
+one Discord-message refresh per attachment per run and one retry of that operation.
+A second 404 remains pending. Other statuses, transport failures, invalid URLs and
+size mismatches do not trigger refresh. Recovered URL/size metadata is retained
+even if GET fails; bytes are committed only after successful validation.
 Known sizes are reused. Missing sizes on existing blobs are measured without
 downloading their bodies again. Known oversized rows require no source/CDN calls. refreshAttachments also uses CDN HEAD rather than API sizes
 when repairing unknown sizes.
@@ -127,8 +131,8 @@ intended as links in the later Discourse import. Known sizes are retained on a r
 skips alone do not cause a failure exit code. Existing blobs are never removed.
 Signed CDN URLs expire; durable link handling remains an importer task.
 
-Five workers process HEAD, metadata update, GET and blob insertion concurrently.
-Attachments in the same message share one source-message request per page.
+Five workers process HEAD, GET, metadata persistence and blob insertion concurrently.
+Attachments needing refresh in the same message share one source-message request per page.
 Discord REST rate handling remains with the existing REST client. Individual
 source/CDN failures remain pending. Database errors stop new work, drain in-flight
 workers, then terminate the command. Only run one exporter/downloader per database.
@@ -351,3 +355,38 @@ No additional schema migration is needed. This supersedes the earlier statement
 that omitting --since always selects all history: that remains true only for
 channels without a pinned date. Four weeks means a concrete calendar date chosen
 by the operator, not a sliding window that changes on every run.
+
+## Backfill progress and download measurements
+
+The backfill CLI counts pending posts before starting. Progress identifies the
+channel, position among channels with work, per-channel checked/failed/remaining,
+overall attempted/checked/failed/remaining, percentage and elapsed seconds. It
+prints on channel transitions, every 100 attempted messages and every 10 seconds,
+including while an API request is waiting. Empty channels are counted in the
+selected total but do not produce repeated empty completion messages.
+
+Run counters cover only posts pending at startup; already captured posts are
+reported separately. Percentage measures attempted work, so a 100% run with
+failures still has pending rows. The final banner is exactly one of:
+
+- `EMBED BACKFILL COMPLETED SUCCESSFULLY`: no pending work, exit 0.
+- `EMBED BACKFILL COMPLETED WITH PENDING WORK`: unresolved posts, exit 2.
+- `EMBED BACKFILL ABORTED`: fatal error, exit 1, no success banner.
+
+A process killed externally may not be able to emit an abort banner. Reruns
+remain resumable. No ETA is claimed; elapsed time is measured.
+
+Downloader progress and final output include:
+
+- `cachedDownloads`: successful files requiring no Discord URL refresh.
+- `sourceRequests`: actual source-message calls made by the downloader for refresh.
+- `refreshedAttachments`: attachments that obtained a replacement source URL.
+- `headRequests` / `downloadRequests`: attempted HEAD/GET calls including retries.
+- `elapsedSeconds`: wall time including database work.
+
+These counters show the CDN-first behavior without guessing an exact count of
+avoided API calls (multiple attachments may share a source call). Expired stored
+URLs cost one initial failed CDN request; already valid URLs need no source API
+request. Measure real speed on the operator's next run; synthetic tests establish
+request counts and correctness, not production throughput. There is no schema
+migration or new dependency for either change.

@@ -37,7 +37,7 @@ test("backfill selects all uncaptured bodies, respects scope/date, and retries l
     const queries: any[]=[];
     const db: any={post:{
         findMany: async(q:any)=>{queries.push(q);return [...pending].filter(id=>!q.where.id || id>q.where.id.gt).map(id=>({id,topicId:"synthetic-topic"}));},
-        updateMany: async(q:any)=>{pending.delete(q.where.id);}, count: async()=>pending.size}};
+        updateMany: async(q:any)=>{pending.delete(q.where.id);return {count:1};}, count: async()=>pending.size}};
     const since=new Date("2024-01-01T00:00:00Z");
     const result=await backfillEmbeds(db,["selected"],async(_,id)=>{if(id==="a")throw Error("not found");return message(id);},since);
     expect(result).toEqual({updated:1,failed:1,remaining:1});

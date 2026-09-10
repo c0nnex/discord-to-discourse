@@ -71,11 +71,11 @@ test("failure includes diagnostic headers but excludes cookies and signed locati
 });
 
 
-test("five workers overlap HEAD/GET and share source lookup for a message", async () => {
+test("five workers overlap HEAD/GET without source calls for valid cached URLs", async () => {
     let active=0,peak=0,requests=0,completed=0,pages=0;
     const prisma={
         attachment:{count:async()=>12-completed,update:async()=>{}},
-        post:{findMany:async()=>pages++?[]:[{id:"post",topicId:"topic",attachments:Array.from({length:12},(_,i)=>({id:String(i),size:null,blob:null}))}]},
+        post:{findMany:async()=>pages++?[]:[{id:"post",topicId:"topic",attachments:Array.from({length:12},(_,i)=>({id:String(i),url:String(i),size:null,blob:null}))}]},
         attachmentBlob:{create:async()=>{completed++;}},
     } as any;
     const result=await downloadAttachments(prisma,async()=>{
@@ -88,15 +88,15 @@ test("five workers overlap HEAD/GET and share source lookup for a message", asyn
         active++;peak=Math.max(peak,active);
         await new Promise(resolve=>setTimeout(resolve,5));return 3n;
     });
-    expect(peak).toBe(5);expect(active).toBe(0);expect(requests).toBe(1);
-    expect(result).toEqual({downloaded:12,skipped:0,failed:0,remaining:0});
+    expect(peak).toBe(5);expect(active).toBe(0);expect(requests).toBe(0);
+    expect(result).toMatchObject({downloaded:12,skipped:0,failed:0,remaining:0});
 });
 
 test("known sizes skip HEAD; missing sizes on existing blobs do not redownload", async () => {
     const rows = [
-        {id:"known",size:3n,blob:null as any},
-        {id:"existing",size:null as bigint|null,blob:{attachmentId:"existing"}},
-        {id:"large",size:BigInt(MAX_DOWNLOAD_SIZE),blob:null},
+        {id:"known",url:"known",size:3n,blob:null as any},
+        {id:"existing",url:"existing",size:null as bigint|null,blob:{attachmentId:"existing"}},
+        {id:"large",url:"large",size:BigInt(MAX_DOWNLOAD_SIZE),blob:null},
     ];
     const pending=()=>rows.filter(r=>r.size===null || (!r.blob && r.size<BigInt(MAX_DOWNLOAD_SIZE)));
     const prisma={
@@ -110,6 +110,6 @@ test("known sizes skip HEAD; missing sizes on existing blobs do not redownload",
     const read=async(url:string,size:number)=>{downloads++;expect(url).toBe("known");expect(size).toBe(3);return {data:Buffer.from("abc"),sha256:"0".repeat(64)};};
     await downloadAttachments(prisma,source,100,read,head);
     await downloadAttachments(prisma,source,100,read,head);
-    expect(heads).toBe(1);expect(downloads).toBe(1);expect(sources).toBe(1);
+    expect(heads).toBe(1);expect(downloads).toBe(1);expect(sources).toBe(0);
     expect(rows[1].size).toBe(4n);
 });

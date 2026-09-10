@@ -1,3 +1,4 @@
+import {AttachmentHttpError} from "./attachment-http";
 import type {PrismaClient} from "@prisma/client";
 import {createHash} from "node:crypto";
 import {formatAttachmentError, getAttachmentSize} from "./attachment-sizes";
@@ -53,7 +54,7 @@ export async function downloadFile(url: string, expectedSize: number, maxBytes: 
                 headers[name] = value;
             }
         }
-        throw new Error(`Attachment response: status=${response.status}; headers=${JSON.stringify(headers)}; ${formatAttachmentError(error, url)}`);
+        throw new AttachmentHttpError(response.status, `Attachment response: status=${response.status}; headers=${JSON.stringify(headers)}; ${formatAttachmentError(error, url)}`);
     } finally {
         // A failed stream can reject cancel too; preserve the diagnostic above.
         await reader?.cancel().catch(() => {});
@@ -69,7 +70,7 @@ export function downloadLimit(value = process.env.MAX_ATTACHMENT_BYTES): number 
     return limit;
 }
 
-/** Refresh URLs per message; process up to five attachments concurrently. */
+/** Try stored URLs first; refresh once after HTTP 404, with five workers. */
 export async function downloadAttachments(
     prisma: PrismaClient,
     getMessage: (channelId: string, messageId: string) => Promise<SourceMessage>,
@@ -77,15 +78,18 @@ export async function downloadAttachments(
     readFile: typeof downloadFile = downloadFile,
     readSize: typeof getAttachmentSize = getAttachmentSize,
 ) {
+    const started = Date.now();
     const pending = {OR: [{size: null}, {blob: null, size: {lt: BigInt(MAX_DOWNLOAD_SIZE)}}]};
     const total = await prisma.attachment.count({where: pending});
     let processed = 0, downloaded = 0, skipped = 0, failed = 0;
+    let sourceRequests = 0, refreshedAttachments = 0, cachedDownloads = 0, headRequests = 0, downloadRequests = 0;
+    const metrics = () => `cachedDownloads=${cachedDownloads}; sourceRequests=${sourceRequests}; refreshedAttachments=${refreshedAttachments}; headRequests=${headRequests}; downloadRequests=${downloadRequests}; elapsedSeconds=${((Date.now() - started) / 1000).toFixed(1)}`;
     let lastId: string | undefined;
-    console.log(`Download policy: maxDownloadSize=${MAX_DOWNLOAD_SIZE}; pending=${total}; concurrency=5; size source=CDN HEAD.`);
+    console.log(`Download policy: maxDownloadSize=${MAX_DOWNLOAD_SIZE}; pending=${total}; concurrency=5; stored URL first; refresh on HTTP 404 only.`);
     while (true) {
         const posts = await prisma.post.findMany({
             where: {attachments: {some: pending}, ...(lastId === undefined ? {} : {id: {gt: lastId}})},
-            select: {id: true, topicId: true, attachments: {where: pending, select: {id: true, size: true, blob: {select: {attachmentId: true}}}}},
+            select: {id: true, topicId: true, attachments: {where: pending, select: {id: true, url: true, size: true, blob: {select: {attachmentId: true}}}}},
             orderBy: {id: "asc"}, take: 100,
         });
         if (posts.length === 0) { break; }
@@ -97,44 +101,63 @@ export async function downloadAttachments(
         async function worker() {
             while (!stopped && next < jobs.length) {
                 const {post, stored} = jobs[next++];
-                let url = "";
-                try {
-                    let size: bigint;
+                let url = stored.url;
+                let refreshed = false;
+                async function withRefresh<T>(action: () => Promise<T>): Promise<T> {
                     try {
-                        let source = sources.get(post.id);
-                        if (!source) {
-                            source = getMessage(post.topicId, post.id);
-                            sources.set(post.id, source);
-                        }
-                        const attachment = (await source).attachments.find(item => item.id === stored.id);
-                        if (!attachment) { throw new Error("Attachment no longer exists in source message"); }
-                        url = attachment.url;
-                        size = stored.size ?? await readSize(url);
+                        return await action();
                     } catch (error) {
+                        if (!(error instanceof AttachmentHttpError) || error.status !== 404 || refreshed) throw error;
+                    }
+                    // Only source/CDN work here; database errors must remain fatal.
+                    let source = sources.get(post.id);
+                    if (!source) {
+                        sourceRequests++;
+                        source = getMessage(post.topicId, post.id);
+                        sources.set(post.id, source);
+                    }
+                    const attachment = (await source).attachments.find(item => item.id === stored.id);
+                    if (!attachment) throw new Error("Attachment no longer exists in source message");
+                    url = attachment.url;
+                    refreshed = true;
+                    refreshedAttachments++;
+                    return action();
+                }
+                try {
+                    let size = stored.size;
+                    let file: DownloadedFile | undefined;
+                    let networkFailed = false;
+                    try {
+                        if (size === null) {
+                            size = await withRefresh(async () => {headRequests++; return readSize(url);});
+                        }
+                        if (!stored.blob && size < BigInt(MAX_DOWNLOAD_SIZE)) {
+                            const expectedSize = Number(size);
+                            file = await withRefresh(async () => {
+                                downloadRequests++;
+                                return readFile(url, expectedSize, Math.min(maxBytes, MAX_DOWNLOAD_SIZE - 1));
+                            });
+                        }
+                    } catch (error) {
+                        networkFailed = true;
                         failed++;
-                        console.warn(`Attachment ${stored.id}: ${formatAttachmentError(error, url)}. HEAD/source failed; download remains pending.`);
-                        continue;
+                        console.warn(`Attachment ${stored.id}: ${formatAttachmentError(error, url)}. Download remains pending.`);
                     }
-                    if (stored.size === null) {
-                        await prisma.attachment.update({where: {id: stored.id}, data: {url, size}});
+                    // Keep recovered metadata even when a subsequent GET fails.
+                    if (refreshed || (stored.size === null && size !== null)) {
+                        await prisma.attachment.update({where: {id: stored.id}, data: {url, ...(size !== null ? {size} : {})}});
                     }
-                    if (stored.blob) { continue; }
-                    if (size >= BigInt(MAX_DOWNLOAD_SIZE)) {
+                    if (networkFailed || stored.blob) continue;
+                    if (size !== null && size >= BigInt(MAX_DOWNLOAD_SIZE)) {
                         skipped++;
                         continue;
                     }
-                    let file: DownloadedFile;
-                    try {
-                        file = await readFile(url, Number(size), Math.min(maxBytes, MAX_DOWNLOAD_SIZE - 1));
-                    } catch (error) {
-                        failed++;
-                        console.warn(`Attachment ${stored.id}: ${formatAttachmentError(error, url)}. Download remains pending.`);
-                        continue;
-                    }
+                    if (!file) throw new Error("Missing completed download");
                     await prisma.attachmentBlob.create({data: {
                         attachmentId: stored.id, content: file.data, sha256: file.sha256,
                     }});
                     downloaded++;
+                    if (!refreshed) cachedDownloads++;
                 } catch (error) {
                     if (!stopped) {
                         fatal = new Error(`Attachment ${stored.id}: database operation failed: ${formatAttachmentError(error, url)}`);
@@ -142,16 +165,15 @@ export async function downloadAttachments(
                     }
                 } finally {
                     processed++;
-                    console.log(`Download attachments [${processed}/${total}]: downloaded=${downloaded}; skipped=${skipped}; failed=${failed}.`);
+                    console.log(`Download attachments [${processed}/${total}]: downloaded=${downloaded}; skipped=${skipped}; failed=${failed}; ${metrics()}.`);
                 }
             }
         }
-        // Drain in-flight operations before disconnecting on a database failure.
         await Promise.all(Array.from({length: Math.min(5, jobs.length)}, () => worker()));
         if (stopped) { throw fatal; }
         lastId = posts[posts.length - 1].id;
     }
     const remaining = await prisma.attachment.count({where: pending});
-    console.log(`Download finished: downloaded=${downloaded}; skipped=${skipped}; failed=${failed}; remaining=${remaining}.`);
-    return {downloaded, skipped, failed, remaining};
+    console.log(`Download finished: downloaded=${downloaded}; skipped=${skipped}; failed=${failed}; remaining=${remaining}; ${metrics()}.`);
+    return {downloaded, skipped, failed, remaining, cachedDownloads, sourceRequests, refreshedAttachments, headRequests, downloadRequests};
 }

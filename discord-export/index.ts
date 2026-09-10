@@ -1,6 +1,6 @@
 import {parseExportOptions} from "./export-options";
 import {readNoExportRoleId, selectControlledChannels, saveChannelSelection, selectRequestedChannel, channelStartDates} from "./export-control";
-import {backfillEmbeds} from "./embed-export";
+import {runEmbedBackfill} from "./embed-export";
 import {backfillMessageReferences} from "./message-references";
 import {REST} from "@discordjs/rest";
 import {API, APIThreadChannel} from "@discordjs/core";
@@ -186,11 +186,9 @@ try {
         initializeDiscordApi(true);
         const channels = await selectChannels(since, false, channelId);
         const dates = await channelStartDates(prisma, channels.map(c => c.id), since);
-        for (const channel of channels) {
-            const result = await backfillEmbeds(prisma, [channel.id],
-                (sourceId, messageId) => api.channels.getMessage(sourceId, messageId), dates.get(channel.id));
-            if (result.failed > 0 || result.remaining > 0) process.exitCode = 2;
-        }
+        const result = await runEmbedBackfill(prisma, channels, dates,
+            (sourceId, messageId) => api.channels.getMessage(sourceId, messageId));
+        if (result.failed > 0 || result.remaining > 0) process.exitCode = 2;
     } else if (command === "backfillMessageReferences") {
         initializeDiscordApi();
         const result = await backfillMessageReferences(prisma, (channelId, messageId) => api.channels.getMessage(channelId, messageId));

@@ -1,3 +1,4 @@
+import {AttachmentHttpError} from "../attachment-http";
 import {expect, test} from "bun:test";
 import {PrismaClient} from "@prisma/client";
 import type {APIMessage} from "@discordjs/core";
@@ -63,7 +64,7 @@ test.skipIf(!databaseUrl)("real database: additive export, atomic blobs and down
         };
         const read = async () => {
             attempts++;
-            if (attempts === 1) { throw new Error("HTTP 404 Not Found"); }
+            if (attempts <= 2) { throw new AttachmentHttpError(404, "HTTP 404 Not Found"); }
             const data = Buffer.from("abc");
             return {data, sha256: createHash("sha256").update(data).digest("hex")};
         };
@@ -77,7 +78,8 @@ test.skipIf(!databaseUrl)("real database: additive export, atomic blobs and down
         expect(blob.downloadedAt).toBeInstanceOf(Date);
         const fetchesBefore = targetFetches;
         await downloadAttachments(prisma, source, 100, read, async()=>3n);
-        expect(attempts).toBe(2);
+        expect(attempts).toBe(3);
+        expect(targetFetches).toBe(1);
         expect(targetFetches).toBe(fetchesBefore);
         const before = await prisma.attachment.findUniqueOrThrow({where: {id: blob.attachmentId}});
         await expect(prisma.$transaction([

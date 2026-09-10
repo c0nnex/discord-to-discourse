@@ -1,3 +1,4 @@
+import {AttachmentHttpError} from "./attachment-http";
 import type {PrismaClient} from "@prisma/client";
 
 const MAX_SIZE = 9223372036854775807n;
@@ -18,7 +19,7 @@ export async function getAttachmentSize(url: string): Promise<bigint> {
     });
     try {
         if (response.status !== 200) {
-            throw new Error(`HEAD returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`);
+            throw new AttachmentHttpError(response.status, `HEAD returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`);
         }
         const length = response.headers.get("content-length");
         if (length === null) {
