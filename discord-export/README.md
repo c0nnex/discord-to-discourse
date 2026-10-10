@@ -390,3 +390,19 @@ URLs cost one initial failed CDN request; already valid URLs need no source API
 request. Measure real speed on the operator's next run; synthetic tests establish
 request counts and correctness, not production throughput. There is no schema
 migration or new dependency for either change.
+
+## Channels and threads deleted on Discord
+
+A full `export` (without `--channel-id`) compares the stored channels with the live guild channel list and deletes
+stored channels that no longer exist on Discord, together with their topics, posts, attachments, blobs, export state
+and pinned start date. Channels that exist but are excluded by the NoExport role are not touched. Users are kept.
+
+Threads are discovered from the database, so a thread deleted on Discord is detected when its messages are requested
+and Discord answers `Unknown Channel` (code 10003). The thread is then deleted with its posts, attachments, blobs and
+export state, logged, and the export continues. Any other error, and an unknown channel for a channel's own direct
+messages, still stops the run; rerun the export and the vanished channel is pruned at the start.
+
+Safeguards: an empty channel list, or one that would delete more than half of the stored channels, aborts before any
+deletion. `backfillEmbeds`, `downloadAttachments`, `refreshAttachments` and single-channel runs never delete. Deletion
+is permanent and there is no dry run, so back up the database first. The final summary reports the number of deleted
+threads.

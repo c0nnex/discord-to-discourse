@@ -8,6 +8,7 @@ import {PrismaClient, Topic} from "@prisma/client";
 import {downloadAttachments} from "./download-attachments.ts";
 import {exportTopic} from "./incremental-export.ts";
 import {channelCreatedAt, persistChannels, type ExportChannel} from "./channel-export.ts";
+import {deleteTopics, formatCounts, isUnknownChannelError, pruneVanishedChannels} from "./deleted-sources.ts";
 import {refreshAttachments} from "./refresh-attachments.ts";
 import {getattachmentSizes} from "./attachment-sizes.ts";
 import {generateRandomName} from "./awesome-animals.ts";
@@ -58,6 +59,10 @@ async function selectChannels(since?: Date, persistSelection = true, channelId?:
         if (!roles.some(role => role.id === roleId)) throw new Error("Configured NoExportRoleId is not present in this guild");
     }
     const source = await api.guilds.getChannels(guildId!);
+    if (persistSelection && !channelId) {
+        const removed = await pruneVanishedChannels(prisma, source.map(channel => channel.id));
+        if (removed.categories > 0) console.log(`Deleted channels missing on Discord: ${formatCounts(removed)}.`);
+    }
     const {selected: allowed, excluded} = selectControlledChannels(source, roleId);
     const selected = selectRequestedChannel(allowed, channelId);
     for (const channel of excluded) console.log(`Excluded channel ${channel.id}: NoExport role marker on channel or parent.`);
@@ -147,6 +152,7 @@ async function exportMessages(selected: readonly ExportChannel[], since?: Date) 
     console.log("Exporting messages...");
     let totalMessages = 0;
     let skippedMessages = 0;
+    let deletedThreads = 0;
     const usedNames = new Set((await prisma.user.findMany({select: {displayName: true}})).map(user => user.displayName));
     function allocateName() {
         let name = generateRandomName();
@@ -169,14 +175,23 @@ async function exportMessages(selected: readonly ExportChannel[], since?: Date) 
         for (const topic of category.topics) {
             console.log(`- Exporting ${topic.id === category.id ? "channel messages" : "thread messages"} for ${topic.title}`);
 
-            const result = await exportTopic(prisma, topic.id,
-                (id, query) => api.channels.getMessages(id, query), allocateName, undefined, dates.get(category.id));
-            totalMessages += result.added;
-            skippedMessages += result.skipped;
+            try {
+                const result = await exportTopic(prisma, topic.id,
+                    (id, query) => api.channels.getMessages(id, query), allocateName, undefined, dates.get(category.id));
+                totalMessages += result.added;
+                skippedMessages += result.skipped;
+            } catch (error) {
+                // Only a deleted thread is expected here; a vanished channel is pruned on the next run.
+                if (topic.id === category.id || !isUnknownChannelError(error)) throw error;
+                const removed = await deleteTopics(prisma, [topic.id]);
+                console.log(`Thread ${topic.id} no longer exists on Discord; deleted ${formatCounts(removed)}.`);
+                deletedThreads++;
+            }
         }
     }
 
-    console.log(`Exported ${totalMessages} new messages; skipped ${skippedMessages} existing messages.`);
+    console.log(`Exported ${totalMessages} new messages; skipped ${skippedMessages} existing messages; ` +
+        `deleted ${deletedThreads} threads missing on Discord.`);
 }
 
 
